@@ -9,6 +9,25 @@ st.set_page_config(page_title="Mental Health Mentor", layout="wide")
 st.markdown("# Mental Health Mentor")
 st.write("Describe how you're feeling and get three short responses: Technical, Realistic, and Emotional support.")
 
+# Chat-style CSS to approximate the earlier UI (bubbles and columns)
+st.markdown('''
+<style>
+.chat-container { background: linear-gradient(180deg,#071129 0%, #081427 100%); padding:16px; border-radius:12px; color:#e6eef8 }
+.user-bubble{ background:#6ee7b7;color:#042;padding:10px 14px;border-radius:12px;display:inline-block; float:right; margin:8px 0; max-width:60%;}
+.bot-bubble{ background:#e6eef8;color:#061125;padding:12px 14px;border-radius:12px;display:inline-block; float:left; margin:8px 0; max-width:60%;}
+.clearfix{clear:both}
+.columns-row{display:flex;gap:12px;margin:10px 0}
+.column{flex:1}
+.column .bubble{background:#e6eef8;color:#061125;padding:12px;border-radius:12px}
+.crisis-banner{background:#7f1d1d;color:#fff;padding:8px 12px;border-radius:8px;margin:10px 0}
+</style>
+''', unsafe_allow_html=True)
+
+# Add a clear chat button
+if st.button("Clear chat"):
+    st.session_state.messages = []
+
+
 MODEL_NAME = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 API_URL = st.secrets.get("API_URL") or os.getenv("API_URL")  # optional: point to your FastAPI /chat endpoint
 
@@ -83,26 +102,31 @@ if submitted:
             emotional = reply.get('emotional','') if isinstance(reply, dict) else ''
             st.session_state.messages.append({"role": "bot", "reply": {"technical": technical, "realistic": realistic, "emotional": emotional}})
 
-# Display messages
+# Display messages in chat-like UI
+chat_html = '<div class="chat-container">'
 for m in st.session_state.messages:
     if m["role"] == "user":
-        st.markdown(f"**You:** {m['text']}")
+        # user bubble (right aligned)
+        chat_html += f"<div class=\"user-bubble\">{m['text']}</div><div class=\"clearfix\"></div>"
     else:
         r = m.get('reply', {})
-        c1, c2, c3 = st.columns([1,1,1])
-        with c1:
-            st.markdown("**Technical**")
-            st.write(r.get('technical',''))
-        with c2:
-            st.markdown("**Realistic**")
-            st.write(r.get('realistic',''))
-        with c3:
-            st.markdown("**Emotional**")
-            st.write(r.get('emotional',''))
-        # crisis banner
-        emo_lower = (r.get('emotional','') or '').lower()
+        # bot columns row
+        tech = r.get('technical','')
+        real = r.get('realistic','')
+        emo = r.get('emotional','')
+        chat_html += '<div class="columns-row">'
+        chat_html += f"<div class=\"column\"><div class=\"bubble\"><strong>Technical</strong><div style=\"margin-top:8px\">{tech}</div></div></div>"
+        chat_html += f"<div class=\"column\"><div class=\"bubble\"><strong>Realistic</strong><div style=\"margin-top:8px\">{real}</div></div></div>"
+        chat_html += f"<div class=\"column\"><div class=\"bubble\"><strong>Emotional</strong><div style=\"margin-top:8px\">{emo}</div></div></div>"
+        chat_html += '</div>'
+        # crisis banner below if present
+        emo_lower = (emo or '').lower()
         if any(k in emo_lower for k in ("immediate danger", "call emergency", "988", "suicid")):
-            st.error("If you are in immediate danger, call emergency services (e.g., 911) now. If you are in the US, call or text 988 for the Suicide & Crisis Lifeline.")
+            chat_html += f"<div class=\"crisis-banner\">{emo}</div>"
+
+chat_html += '</div>'
+
+st.markdown(chat_html, unsafe_allow_html=True)
 
 st.markdown("---")
 st.caption("This tool provides mental health guidance but is not a substitute for professional care.")
