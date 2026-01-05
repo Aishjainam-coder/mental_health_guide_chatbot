@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AI Mentor Chatbot</title>
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--accent:#6ee7b7;--muted:#94a3b8;--bubble-you:#0ea5a0;--bubble-bot:#111827}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,'Helvetica Neue',Arial}
+    body{background:linear-gradient(180deg,#071129 0%, #081427 100%);color:#e6eef8;display:flex;align-items:center;justify-content:center}
+    .app{width:100%;max-width:760px;height:90vh;background:linear-gradient(180deg,rgba(255,255,255,0.02), rgba(255,255,255,0.01));border-radius:12px;padding:18px;box-shadow:0 10px 30px rgba(2,6,23,0.6);display:flex;flex-direction:column}
+    header{display:flex;align-items:center;justify-content:space-between;padding-bottom:10px}
+    header h1{margin:0;font-size:1.1rem}
+    header .meta{color:var(--muted);font-size:0.85rem}
+    main.chat{flex:1;overflow:auto;padding:12px;border-radius:8px;background:linear-gradient(180deg, rgba(255,255,255,0.01),transparent);box-shadow:inset 0 1px 0 rgba(255,255,255,0.02)}
+    .msg{display:flex;margin:8px 0;align-items:flex-end}
+    .msg.you{justify-content:flex-end}
+    .bubble{max-width:78%;padding:12px 14px;border-radius:14px;color:#061125;line-height:1.4}
+    .bubble.you{background:var(--accent);color:#012; border-bottom-right-radius:4px}
+    .bubble.bot{background:#e6eef8; color:#061125; border-bottom-left-radius:4px}
+    footer.input{display:flex;gap:8px;padding-top:12px}
+    .input input{flex:1;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit}
+    .input button{padding:10px 14px;border-radius:10px;border:0;background:var(--accent);color:#042;cursor:pointer}
+    .status{padding:8px 10px;font-size:0.9rem;color:var(--muted);}
+    .meta small{display:block;color:var(--muted);font-size:0.75rem}
+    .loading{display:inline-block;margin-left:8px;width:14px;height:14px;border:2px solid rgba(0,0,0,0.15);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @media (max-width:480px){.app{height:100vh;border-radius:0;padding:12px}}
+    .columns-row{display:flex;gap:12px;margin:10px 0}
+    .column{flex:1}
+    .column .bubble{max-width:100%}
+    .crisis-banner{background:#7f1d1d;color:#fff;padding:8px 12px;border-radius:8px;margin:10px 0} 
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Mental Health Mentor</h1>
+      <div class="meta">Model: <strong id="model">loading...</strong><small id="hint">Three short responses shown in columns: Technical, Realistic, Emotional.</small></div>
+    </header>
+
+    <main id="chat" class="chat" aria-live="polite"></main>
+
+    <form id="inputForm" class="input" onsubmit="return false;">
+      <input id="msg" autocomplete="off" placeholder="Say something like: 'Teach me linear regression'" />
+      <button id="sendBtn">Send</button>
+    </form>
+
+    <div id="status" class="status"></div>
+  </div>
+
+  <script>
+    const modelEl = document.getElementById('model');
+    const statusEl = document.getElementById('status');
+    const chatEl = document.getElementById('chat');
+    const input = document.getElementById('msg');
+    const sendBtn = document.getElementById('sendBtn');
+
+    // Display model from server environment if possible (Optional: client-side fallback)
+    fetch('/chat', { method: 'OPTIONS' }).catch(()=>{}); // warm-up
+
+    // Try to read model from HTML meta (optional: localStorage fallback)
+    modelEl.textContent = (localStorage.getItem('GROQ_MODEL') || 'unknown');
+
+    function escapeHtml(s){ return s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+
+    function addMessage(role, text){
+      const wrap = document.createElement('div');
+      wrap.className = 'msg ' + (role === 'you' ? 'you' : 'bot');
+      const b = document.createElement('div');
+      b.className = 'bubble ' + (role === 'you' ? 'you' : 'bot');
+      b.innerHTML = escapeHtml(text).replace(/\n/g,'<br>');
+      wrap.appendChild(b);
+      chatEl.appendChild(wrap);
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }
+
+    function addLabeledMessage(label, text){
+      const wrap = document.createElement('div');
+      wrap.className = 'msg bot';
+      const container = document.createElement('div');
+      container.style.display = 'flex';
+      container.style.flexDirection = 'column';
+      const lbl = document.createElement('div');
+      lbl.style.fontSize = '0.75rem';
+      lbl.style.color = 'var(--muted)';
+      lbl.style.marginBottom = '6px';
+      lbl.textContent = label;
+      const b = document.createElement('div');
+      b.className = 'bubble bot';
+      b.innerHTML = escapeHtml(text).replace(/\n/g,'<br>');
+      container.appendChild(lbl);
+      container.appendChild(b);
+      wrap.appendChild(container);
+      chatEl.appendChild(wrap);
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }
+
+    async function sendMessage(text){
+      if(!text || !text.trim()) return;
+      addMessage('you', text);
+      input.value = '';
+      statusEl.innerHTML = '<span>Sending…</span> <span class="loading"></span>';
+      sendBtn.disabled = true; input.disabled = true;
+
+      try{
+        const res = await fetch('/chat', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ user_id: 'web-user', message: text })
+        });
+
+        if(!res.ok){
+          const data = await res.json().catch(()=>({detail:'Unknown error'}));
+          addMessage('bot', `Error: ${data.detail || res.statusText}`);
+          statusEl.textContent = `Error: ${data.detail || res.statusText}`;
+        } else {
+          const data = await res.json();
+          const r = data.reply;
+
+          function looksLikeCrisis(text){
+            if(!text) return false;
+            const t = text.toLowerCase();
+            return t.includes('immediate danger') || t.includes('call emergency') || t.includes('988') || t.includes('suicid');
+          }
+
+          if(r && typeof r === 'object'){
+            // Columns view: always show all three columns
+            const row = document.createElement('div');
+            row.className = 'columns-row';
+
+            const tech = document.createElement('div'); tech.className='column'; tech.innerHTML = '<div class="meta" style="margin-bottom:6px;color:var(--muted);">Technical</div><div class="bubble bot">'+escapeHtml(r.technical||'')+'</div>'; row.appendChild(tech);
+            const real = document.createElement('div'); real.className='column'; real.innerHTML = '<div class="meta" style="margin-bottom:6px;color:var(--muted);">Realistic</div><div class="bubble bot">'+escapeHtml(r.realistic||'')+'</div>'; row.appendChild(real);
+            const emo = document.createElement('div'); emo.className='column'; emo.innerHTML = '<div class="meta" style="margin-bottom:6px;color:var(--muted);">Emotional</div><div class="bubble bot">'+escapeHtml(r.emotional||'')+'</div>'; row.appendChild(emo);
+
+            chatEl.appendChild(row);
+            chatEl.scrollTop = chatEl.scrollHeight;
+
+            if(looksLikeCrisis(r.emotional||'')){
+              const b = document.createElement('div'); b.className='crisis-banner'; b.textContent = r.emotional; chatEl.appendChild(b); chatEl.scrollTop = chatEl.scrollHeight;
+            }
+          } else {
+            addMessage('bot', data.reply || '[no reply]');
+          }
+
+          statusEl.textContent = 'Delivered';
+        }
+      }catch(err){
+        addMessage('bot', `Network error: ${err.message}`);
+        statusEl.textContent = 'Network error';
+      } finally{
+        sendBtn.disabled = false; input.disabled = false; setTimeout(()=>statusEl.textContent='','3000');
+      }
+    }
+
+    document.getElementById('inputForm').addEventListener('submit', async (e)=>{
+      e.preventDefault(); await sendMessage(input.value);
+    });
+
+    sendBtn.addEventListener('click', ()=>sendMessage(input.value));
+    input.addEventListener('keydown', (e)=>{ if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); sendMessage(input.value); } });
+
+    // Friendly welcome
+    addMessage('bot','Hi! I\'m your Mental Health Mentor. Describe how you\'re feeling or what happened, and I\'ll respond with three short columns: Technical, Realistic, and Emotional support.');
+
+  </script>
+</body>
+</html>
